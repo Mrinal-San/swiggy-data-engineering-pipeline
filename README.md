@@ -15,17 +15,9 @@ The pipeline follows a raw, Silver, and Gold flow:
 
 The application does not load the large CSV files into memory. It sends SQL to Athena and displays the returned results.
 
-```mermaid
-flowchart LR
-    CSV["CSV source data"] --> S3["Amazon S3"]
-    S3 --> Glue["Glue Data Catalog<br/>Bronze sources"]
-    Glue --> Athena["Amazon Athena"]
-    Athena --> Silver["dbt Silver views"]
-    Silver --> Gold["dbt Gold tables"]
-    Gold --> Dashboard["Streamlit dashboard"]
-    Gold --> Gemini["Gemini SQL assistant"]
-    Gemini --> Athena
-```
+![Swiggy Data Engineering Pipeline architecture](docs/architecture.png)
+
+*End-to-end architecture, analytics flow, and local execution steps.*
 
 ## What's included
 

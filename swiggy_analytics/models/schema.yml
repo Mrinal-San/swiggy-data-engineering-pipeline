@@ -1,0 +1,60 @@
+
+version: 2
+
+models:
+  - name: slv_food
+    columns:
+      - name: food_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: slv_menu
+    columns:
+      - name: menu_id
+        data_tests:
+          - not_null
+      - name: restaurant_id
+        data_tests:
+          - not_null
+      - name: food_id
+        data_tests:
+          - not_null
+
+  - name: slv_order_items
+    columns:
+      - name: order_item_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: slv_orders
+    columns:
+      - name: order_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: slv_restaurants
+    columns:
+      - name: restaurant_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: slv_reviews
+    columns:
+      - name: review_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: slv_users
+    columns:
+      - name: user_id
+        data_tests:
+          - not_null
+          - unique
+
+data_tests:
+  - name: assert_slv_menu_combination_unique

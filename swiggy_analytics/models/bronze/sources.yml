@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: swiggy_bronze
+    database: awsdatacatalog
+    schema: swiggy_bronze
+    description: "Raw Swiggy datasets stored in Amazon S3."
+    tables:
+      - name: food
+      - name: menu
+      - name: orders
+      - name: order_items
+      - name: restaurants
+      - name: reviews
+      - name: users

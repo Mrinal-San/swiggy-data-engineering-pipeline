@@ -1,0 +1,58 @@
+# Python environments and caches
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+**/profiles.yml
+**/.aws/
+**/credentials
+**/credentials.*
+/.streamlit/secrets.toml
+/.streamlit/credentials.toml
+**/secrets.toml
+*.pem
+*.key
+*.p12
+*.pfx
+
+# dbt and application-generated output
+**/target/
+**/dbt_packages/
+**/logs/
+*.log
+
+# Local source data (may contain customer information)
+data/raw/
+
+# Local databases and exported data
+*.db
+*.sqlite3
+*.duckdb
+*.parquet
+*.xlsx
+*.xls
+
+# OS and editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

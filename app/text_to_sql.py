@@ -2,6 +2,7 @@
 import os
 import re
 import time
+from functools import lru_cache
 
 import boto3
 from dotenv import load_dotenv
@@ -10,11 +11,9 @@ from google import genai
 load_dotenv()
 
 # Gemini configuration
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    raise RuntimeError("GEMINI_API_KEY is missing from your .env file.")
-
-client = genai.Client(api_key=api_key)
+@lru_cache(maxsize=1)
+def get_genai_client(api_key: str) -> genai.Client:
+    return genai.Client(api_key=api_key)
 
 # AWS Athena configuration
 REGION = "ap-southeast-2"
@@ -71,7 +70,11 @@ Rules:
 User question: {question}
 """
 
-    response = client.models.generate_content(
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is missing from your .env file.")
+
+    response = get_genai_client(api_key).models.generate_content(
         model="gemini-3.8-flash",
         contents=prompt,
     )
@@ -134,8 +137,11 @@ def validate_sql(sql: str) -> str:
     return cleaned
 
 
-def execute_sql(sql: str) -> list[dict]:
+def execute_sql(sql: str, *, max_rows: int = 100) -> list[dict]:
     """Run a validated query and return rows as dictionaries."""
+    if not isinstance(max_rows, int) or not 1 <= max_rows <= 5000:
+        raise ValueError("max_rows must be an integer between 1 and 5000.")
+
     response = athena.start_query_execution(
         QueryString=sql,
         QueryExecutionContext={"Database": DATABASE},
@@ -180,7 +186,7 @@ def execute_sql(sql: str) -> list[dict]:
             values += [None] * (len(column_names) - len(values))
             rows.append(dict(zip(column_names, values)))
 
-            if len(rows) >= 100:
+            if len(rows) >= max_rows:
                 return rows
 
     return rows

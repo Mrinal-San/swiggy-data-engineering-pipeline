@@ -38,6 +38,7 @@ The text-to-SQL checks are prototype safeguards. They do not replace carefully s
 ```text
 .
 ├── app/                         # Streamlit UI and Gemini/Athena integration
+│   └── assets/                  # Swiggy wordmark and app icon (SVG)
 ├── data/raw/                    # Local CSV inputs; excluded from Git
 ├── docs/                        # Architecture diagram
 ├── glue/                        # Glue crawler setup guide
@@ -114,9 +115,9 @@ With `.env` and AWS access configured:
 python -m streamlit run .\app\streamlit_app.py
 ```
 
-The app provides an **Ask** view and an **Analytics** dashboard. The Ask view sends a question to Gemini, displays generated SQL, and submits the query to Athena. The dashboard reads the Gold tables. Chat responses are cached for 60 seconds and dashboard queries for 5 minutes; refreshing clears the caches and may run new Athena queries.
+The app provides an **Ask AI** view and an **Analytics** dashboard, with a Swiggy-branded interface. Ask AI uses Gemini to draft SQL, applies read-only and approved-table checks, then submits it to Athena. Analytics queries Athena directly and does not require a Gemini API key; AWS access and the Gold tables are still required. Chat responses are cached for 60 seconds and dashboard queries for 5 minutes; refreshing clears the caches and may run new Athena queries.
 
-The app expects `swiggy_gold.gld_daily_sales` and `swiggy_gold.gld_restaurant_performance`. `total_sales` includes recorded orders across statuses in the daily sales model; use `completed_order_sales` for completed-order restaurant sales. Inspect the generated SQL and results before relying on them.
+The app expects `swiggy_gold.gld_daily_sales` and `swiggy_gold.gld_restaurant_performance`. The dashboard filters daily sales by an applied order-date range and INR currency, and shows weekly trends plus city and cuisine breakdowns for that range. `total_sales` includes recorded orders across statuses in the daily sales model; the completed-sales restaurant table uses `completed_order_sales` and is all time. The order count sums distinct order IDs at the Gold table's date/city/cuisine/currency grain, so it should not be interpreted as a globally deduplicated count when an order can occur in multiple groups. Inspect generated SQL and results before relying on them.
 
 An optional Gemini connectivity check is available at `app/test_openai.py` (the filename is retained for historical reasons). Running it makes an external API request and may use quota:
 

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="76" viewBox="0 0 320 76" role="img" aria-labelledby="title">
+  <title id="title">Swiggy</title>
+  <g fill="none" stroke="#FC8019" stroke-linecap="round" stroke-linejoin="round" stroke-width="7">
+    <path d="M42 10c-9 7-17 10-23 18-5 7-4 15 3 19 6 4 14 2 19-3 4-4 6-9 7-15"/>
+    <path d="M25 48c-4 8-4 15 2 19 6 4 14 1 20-5 4-4 7-10 8-17"/>
+    <path d="M27 30c7-4 15-5 23-3"/>
+  </g>
+  <text x="78" y="55" fill="#262626" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="700" letter-spacing="-2">Swiggy</text>
+</svg>

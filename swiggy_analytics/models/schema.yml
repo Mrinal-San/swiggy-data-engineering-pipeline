@@ -56,5 +56,31 @@ models:
           - not_null
           - unique
 
+  - name: gld_food_performance
+    description: Dish-level units and recorded item sales by date, restaurant, order status, and currency.
+    columns:
+      - name: food_id
+        data_tests:
+          - not_null
+      - name: food_name
+        data_tests:
+          - not_null
+      - name: order_date
+        data_tests:
+          - not_null
+      - name: total_quantity
+        data_tests:
+          - not_null
+      - name: completed_quantity
+        data_tests:
+          - not_null
+      - name: total_item_sales
+        data_tests:
+          - not_null
+      - name: completed_item_sales
+        data_tests:
+          - not_null
+
 data_tests:
   - name: assert_slv_menu_combination_unique
+  - name: assert_gld_food_performance_grain_unique

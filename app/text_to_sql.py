@@ -3,10 +3,14 @@ import os
 import re
 import time
 from functools import lru_cache
+from dataclasses import dataclass
 
 import boto3
 from dotenv import load_dotenv
 from google import genai
+import sqlglot
+from sqlglot import exp
+from sqlglot.optimizer.scope import traverse_scope
 
 load_dotenv()
 
@@ -20,11 +24,15 @@ REGION = "ap-southeast-2"
 DATABASE = "swiggy_gold"
 WORKGROUP = "primary"
 RESULTS_S3 = "s3://swiggy-pipeline-mrinal/athena-results/"
+QUERY_TIMEOUT_SECONDS = 180
+MAX_SQL_LENGTH = 20_000
+MAX_QUERY_RESULT_ROWS = 5000
 
 athena = boto3.client("athena", region_name=REGION)
 
-# Only these Gold tables may be queried.
-ALLOWED_TABLES = {
+# The AI analyst is restricted to Gold. The direct dashboard also reads these
+# explicitly approved Silver views through the same validated Athena boundary.
+GOLD_TABLES = {
     "gld_daily_sales": [
         "order_date", "restaurant_city", "cuisine", "currency",
         "total_orders", "total_items", "total_quantity",
@@ -39,6 +47,29 @@ ALLOWED_TABLES = {
         "total_recorded_sales", "completed_order_sales",
         "avg_order_customer_rating", "avg_delivery_time_min",
     ],
+    "gld_food_performance": [
+        "food_id", "food_name", "order_date", "restaurant_id",
+        "restaurant_city", "cuisine", "currency", "order_status",
+        "total_quantity", "completed_quantity", "total_orders",
+        "total_item_sales", "completed_item_sales",
+    ],
+}
+SILVER_TABLES = {
+    "slv_orders": [
+        "order_id", "order_date", "restaurant_id", "restaurant_city",
+        "cuisine", "items_count", "sales_qty", "subtotal", "discount",
+        "delivery_fee", "gst", "sales_amount", "currency", "order_status",
+        "customer_rating", "delivery_time_min",
+    ],
+    "slv_restaurants": [
+        "restaurant_id", "restaurant_name", "city", "rating",
+        "rating_count", "cost", "cuisine",
+    ],
+}
+ALLOWED_TABLES = {**GOLD_TABLES, **SILVER_TABLES}
+TABLE_SCHEMAS = {
+    **{table: "swiggy_gold" for table in GOLD_TABLES},
+    **{table: "swiggy_silver" for table in SILVER_TABLES},
 }
 
 
@@ -46,7 +77,7 @@ def generate_sql(question: str) -> str:
     """Generate SQL using the actual Gold table schemas."""
     schema_description = "\n".join(
         f"Table {table}: {', '.join(columns)}"
-        for table, columns in ALLOWED_TABLES.items()
+        for table, columns in GOLD_TABLES.items()
     )
 
     prompt = f"""
@@ -57,7 +88,7 @@ Available schema:
 
 Rules:
 - Generate exactly one read-only SELECT query.
-- Use only the two listed tables and their listed columns.
+- Use only the listed tables and their listed columns.
 - Fully qualify tables as "swiggy_gold"."table_name".
 - Never use INSERT, UPDATE, DELETE, MERGE, DROP, CREATE, ALTER,
   UNLOAD, or multiple statements.
@@ -65,7 +96,15 @@ Rules:
 - Include LIMIT 100 unless the query already has a stricter limit.
 - For highest completed restaurant sales, use completed_order_sales.
 - For daily sales, use total_sales from gld_daily_sales.
-- Return SQL only, with no Markdown fences or explanation.
+- For most-selling dishes, rank SUM(total_quantity) from gld_food_performance;
+  if asked for completed orders only, rank SUM(completed_quantity).
+- Dish quantities include all order statuses unless the question says completed.
+- Dish sales use total_item_sales or completed_item_sales only when asked for sales.
+- If the question cannot be answered from these columns, return exactly:
+  UNSUPPORTED: followed by a short reason.
+- Questions asking for causes or causal relationships must be marked unsupported.
+- Never infer causes, correlations, or financial profit from these tables.
+- Otherwise return SQL only, with no Markdown fences or explanation.
 
 User question: {question}
 """
@@ -86,61 +125,110 @@ User question: {question}
 
 
 def validate_sql(sql: str) -> str:
-    """Apply basic read-only and table allowlist checks."""
-    cleaned = sql.strip().rstrip(";")
+    """Parse and allow only one SELECT over approved Gold tables."""
+    if not isinstance(sql, str) or not sql.strip():
+        raise ValueError("SQL query is empty.")
+    if len(sql) > MAX_SQL_LENGTH:
+        raise ValueError(f"SQL exceeds the {MAX_SQL_LENGTH:,}-character limit.")
+    try:
+        statements = sqlglot.parse(sql, read="trino")
+    except sqlglot.errors.ParseError as exc:
+        raise ValueError("SQL could not be parsed as Athena-compatible SQL.") from exc
+    if len(statements) != 1 or statements[0] is None:
+        raise ValueError("Exactly one SQL statement is allowed.")
 
-    if not cleaned:
-        raise ValueError("Gemini returned an empty SQL query.")
-
-    # Permit one statement only.
-    if ";" in cleaned:
-        raise ValueError("Multiple SQL statements are not allowed.")
-
-    # Only SELECT queries are permitted in this first version.
-    if not re.match(r"(?is)^SELECT\b", cleaned):
-        raise ValueError("Only SELECT queries are allowed in this version.")
-
-    # Block comments and suspicious SQL tokens.
-    if re.search(r"(?is)(--|/\*|\*/)", cleaned):
-        raise ValueError("SQL comments are not allowed.")
-
-    forbidden = (
-        r"\b(insert|update|delete|merge|drop|create|alter|"
-        r"unload|grant|revoke|call|execute|prepare|deallocate)\b"
-    )
-    if re.search(forbidden, cleaned, flags=re.IGNORECASE):
+    tree = statements[0]
+    if not isinstance(tree, (exp.Select, exp.Union)):
+        raise ValueError("Only read-only SELECT queries are allowed.")
+    if any(
+        next(tree.find_all(kind), None) is not None
+        for kind in (exp.Into, exp.Command, exp.Copy)
+    ):
         raise ValueError("The query contains a prohibited SQL operation.")
+    if next(tree.find_all(exp.Unnest), None) is not None:
+        raise ValueError("Table-valued functions are not allowed.")
+    for select in tree.find_all(exp.Select):
+        if any(
+            isinstance(item, exp.Star)
+            or (isinstance(item, exp.Column) and item.is_star)
+            for item in select.expressions
+        ):
+            raise ValueError("SELECT * is not allowed; name the required columns.")
 
-    # Require at least one approved, fully-qualified Gold table.
-    tables_used = re.findall(
-        r'(?i)"swiggy_gold"\s*\.\s*'
-        r'"(gld_daily_sales|gld_restaurant_performance)"',
-        cleaned,
-    )
-    if not tables_used:
+    cte_names = {
+        cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)
+    }
+    tables = list(tree.find_all(exp.Table))
+    base_tables = [table for table in tables if table.name.lower() not in cte_names]
+    if not base_tables:
         raise ValueError("The query must reference an approved Gold table.")
+    for table in base_tables:
+        if table.name.lower() not in ALLOWED_TABLES:
+            raise ValueError(f"Table not allowed: {table.name}")
+        if table.db.lower() != TABLE_SCHEMAS[table.name.lower()]:
+            raise ValueError(f"Schema not allowed: {table.db or '(missing)'}")
+        if table.catalog and table.catalog.lower() not in {"awsdatacatalog", "default"}:
+            raise ValueError(f"Catalog not allowed: {table.catalog}")
 
-    # Reject other table names in FROM or JOIN clauses.
-    table_refs = re.findall(
-        r'(?i)\b(?:from|join)\s+'
-        r'(?:"?([a-zA-Z_][\w]*)"?\s*\.\s*)?'
-        r'"?([a-zA-Z_][\w]*)"?',
-        cleaned,
-    )
+    for scope in traverse_scope(tree):
+        projection_aliases = {
+            item.alias_or_name.lower()
+            for item in scope.expression.expressions
+            if isinstance(item, exp.Alias) and item.alias_or_name
+        }
+        for column in scope.columns:
+            if column.is_star or column.name.lower() in projection_aliases:
+                continue
+            sources = list(scope.sources.items())
+            if column.table:
+                sources = [
+                    (alias, source) for alias, source in sources
+                    if alias.lower() == column.table.lower()
+                ]
+            available = set()
+            for _, source in sources:
+                if isinstance(source, exp.Table):
+                    available.update(ALLOWED_TABLES.get(source.name.lower(), []))
+                elif hasattr(source, "expression"):
+                    available.update(
+                        item.alias_or_name.lower()
+                        for item in source.expression.expressions
+                        if item.alias_or_name
+                    )
+            if available and column.name.lower() not in available:
+                raise ValueError(f"Column not allowed or not found: {column.name}")
 
-    for schema, table in table_refs:
-        if schema and schema.lower() != DATABASE.lower():
-            raise ValueError(f"Schema not allowed: {schema}")
-        if table.lower() not in ALLOWED_TABLES:
-            raise ValueError(f"Table not allowed: {table}")
+    limit = tree.args.get("limit")
+    if limit is None:
+        tree.limit(MAX_QUERY_RESULT_ROWS, copy=False)
+    else:
+        limit_expression = limit.expression
+        if not isinstance(limit_expression, exp.Literal) or not limit_expression.is_int:
+            raise ValueError("Query LIMIT must be an integer literal.")
+        if int(limit_expression.this) > MAX_QUERY_RESULT_ROWS:
+            tree.set(
+                "limit",
+                exp.Limit(expression=exp.Literal.number(MAX_QUERY_RESULT_ROWS)),
+            )
 
-    return cleaned
+    return tree.sql(dialect="trino")
 
 
-def execute_sql(sql: str, *, max_rows: int = 100) -> list[dict]:
-    """Run a validated query and return rows as dictionaries."""
+@dataclass
+class AthenaQueryReport:
+    rows: list[dict]
+    execution_seconds: float
+    retrieval_seconds: float
+    engine_execution_ms: int | None
+    data_scanned_bytes: int | None
+    query_execution_id: str
+
+
+def execute_sql_report(sql: str, *, max_rows: int = 100) -> AthenaQueryReport:
+    """Validate and execute one bounded query; return rows and Athena metrics."""
     if not isinstance(max_rows, int) or not 1 <= max_rows <= 5000:
         raise ValueError("max_rows must be an integer between 1 and 5000.")
+    sql = validate_sql(sql)
 
     response = athena.start_query_execution(
         QueryString=sql,
@@ -150,6 +238,7 @@ def execute_sql(sql: str, *, max_rows: int = 100) -> list[dict]:
     )
 
     execution_id = response["QueryExecutionId"]
+    submitted_at = time.monotonic()
 
     while True:
         status_response = athena.get_query_execution(
@@ -159,7 +248,11 @@ def execute_sql(sql: str, *, max_rows: int = 100) -> list[dict]:
 
         if status in ("SUCCEEDED", "FAILED", "CANCELLED"):
             break
-
+        if time.monotonic() - submitted_at >= QUERY_TIMEOUT_SECONDS:
+            athena.stop_query_execution(QueryExecutionId=execution_id)
+            raise TimeoutError(
+                f"Athena query exceeded {QUERY_TIMEOUT_SECONDS} seconds and was cancelled."
+            )
         time.sleep(1)
 
     if status != "SUCCEEDED":
@@ -168,6 +261,7 @@ def execute_sql(sql: str, *, max_rows: int = 100) -> list[dict]:
         )
         raise RuntimeError(f"Athena query {status}: {reason}")
 
+    completed_at = time.monotonic()
     paginator = athena.get_paginator("get_query_results")
     rows = []
     column_names = None
@@ -187,9 +281,26 @@ def execute_sql(sql: str, *, max_rows: int = 100) -> list[dict]:
             rows.append(dict(zip(column_names, values)))
 
             if len(rows) >= max_rows:
-                return rows
+                break
+        if len(rows) >= max_rows:
+            break
 
-    return rows
+    retrieval_finished_at = time.monotonic()
+    query_info = status_response["QueryExecution"]
+    statistics = query_info.get("Statistics", {})
+    return AthenaQueryReport(
+        rows=rows,
+        execution_seconds=completed_at - submitted_at,
+        retrieval_seconds=retrieval_finished_at - completed_at,
+        engine_execution_ms=statistics.get("EngineExecutionTimeInMillis"),
+        data_scanned_bytes=statistics.get("DataScannedInBytes"),
+        query_execution_id=execution_id,
+    )
+
+
+def execute_sql(sql: str, *, max_rows: int = 100) -> list[dict]:
+    """Run a validated query and return rows as dictionaries."""
+    return execute_sql_report(sql, max_rows=max_rows).rows
 
 
 def ask(question: str) -> None:

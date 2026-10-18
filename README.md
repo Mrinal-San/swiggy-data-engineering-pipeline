@@ -11,13 +11,13 @@ The pipeline follows a raw, Silver, and Gold flow:
 1. CSV files are stored in S3 under `raw/`.
 2. Glue Data Catalog tables describe the files for Athena.
 3. dbt builds cleaned Silver views and analytics-oriented Gold tables.
-4. The Streamlit dashboard queries Silver views for its metrics, while Ask AI queries the approved Gold tables.
+4. The Streamlit application queries verified Gold tables for its dashboard and analytics sections. The AI Data Assistant uses the approved Gold-table allowlist.
 
 The application does not load the large CSV files into memory. It sends SQL to Athena and displays the returned results.
 
 ![Swiggy Data Engineering Pipeline architecture](docs/architecture.png)
 
-*End-to-end architecture, analytics flow, and local execution steps.*
+*Architecture image retained for now; replace `docs/architecture.png` when the updated diagram is ready.*
 
 ## What's included
 
@@ -26,9 +26,9 @@ The application does not load the large CSV files into memory. It sends SQL to A
 | Source data | Seven CSV datasets: food, menu, orders, order items, restaurants, reviews, and users |
 | Bronze | dbt source definitions for seven Glue Catalog tables in `swiggy_bronze` |
 | Silver | Seven dbt views in `swiggy_silver`, including a users model that excludes names, emails, and passwords |
-| Gold | `gld_daily_sales`, `gld_restaurant_performance`, and `gld_food_performance` tables in `swiggy_gold` |
+| Gold | Daily sales, restaurant performance, customer, rating, delivery, order-status, city, cuisine, and top-restaurant analytics models in `swiggy_gold` |
 | Data quality | dbt schema tests and a custom test for duplicate menu combinations |
-| Application | Streamlit dashboard and Gemini-powered question interface |
+| Application | Swiggy-branded Streamlit dashboard, analytics sections, and Gemini-powered AI Data Assistant |
 | Orchestration | Not included; data upload, dbt runs, and refreshes are manual |
 
 SQL is parsed with SQLGlot and constrained to read-only queries over approved Gold tables and columns. AWS IAM remains the access-control boundary; review this learning project before production use. Sales fields describe recorded order amounts and should not be treated as settled payments without a separate business definition.
@@ -110,15 +110,17 @@ dbt test --project-dir $ProjectDir --profiles-dir $ProfileDir
 
 ## Run the application
 
-With `.env` and AWS access configured:
+With `.env` and AWS access configured, run the single Streamlit entry point:
 
 ```powershell
 python -m streamlit run .\app\streamlit_app.py
 ```
 
-The app provides an **Ask AI** view and an **Analytics** dashboard, with a Swiggy-branded interface. Ask AI uses a bounded workflow: Gemini drafts one SQL query, SQLGlot parses and checks its tables and columns, Athena executes it, and the app summarizes only returned data. It can prepare a bounded Plotly chart for compatible results; it never executes generated Python. The interface reports Gemini, Athena, and result-retrieval timings when available. Chat history supports creating, renaming, and deleting conversations, and editing a question reruns analysis from that turn. History is held in Streamlit session state and is cleared when the session ends. Analytics queries Athena directly and does not require a Gemini API key; AWS access and the Silver views are required. Chat responses are cached for 60 seconds and dashboard queries for 5 minutes; refreshing clears the caches and may run new Athena queries.
+The app has separate sidebar sections for **Dashboard**, **AI Assistant**, **Restaurant Analytics**, **Customer Analytics**, **Delivery & Orders**, and **Data Status**. The Dashboard applies a selected date range and INR filter to its daily sales KPIs and date-based charts. The customer, restaurant, delivery, and order-status sections use Gold models that contain all-time aggregates; those views are labeled accordingly. The dashboard date selection and AI conversation remain in Streamlit session state while navigating between sections.
 
-The Analytics dashboard reads `swiggy_silver.slv_orders` and `swiggy_silver.slv_restaurants` directly. It filters orders by an applied date range and INR currency, and shows recorded sales, distinct order counts, weekly trends, and city/cuisine breakdowns. The restaurant leaderboard aggregates order metrics from Silver orders and joins them to Silver restaurant details. Recorded sales include all order statuses; completed restaurant sales include orders whose status is completed. Ask AI remains restricted to `swiggy_gold.gld_daily_sales`, `swiggy_gold.gld_restaurant_performance`, and `swiggy_gold.gld_food_performance`; “most selling dish” ranks units across all statuses unless you specify completed orders. Run dbt to build the Silver views and Gold food performance model before using the application.
+The AI Data Assistant uses the existing bounded workflow: Gemini drafts a query, SQLGlot validates one read-only statement against the approved Gold tables and columns, and Athena executes it. The app displays returned rows and may chart results with clearly meaningful time-series or category-comparison columns. Generated SQL and technical errors are available in collapsed expanders. It never executes generated Python. AI requests require `GEMINI_API_KEY`; all data views require AWS access and the corresponding Gold tables. Dashboard queries are cached for up to 5 minutes, while generated SQL and AI query results are cached for up to 60 seconds. Refreshing clears these caches and may trigger new Athena queries.
+
+Recorded sales include all order statuses and are not a settled-payment or profit measure. Average order value is recorded sales divided by recorded orders. Restaurant rankings use completed-order sales and are all-time because `gld_restaurant_performance` is a restaurant-level aggregate without a dashboard date filter. Delivery averages are weighted by orders with a recorded delivery time. Customer summaries are all-time aggregates. The AI query allowlist follows the current Gold schemas in `app/text_to_sql.py`; it does not include removed models such as `gld_food_performance`.
 
 An optional Gemini connectivity check is available at `app/test_openai.py` (the filename is retained for historical reasons). Running it makes an external API request and may use quota:
 

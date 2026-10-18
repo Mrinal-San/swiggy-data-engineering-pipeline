@@ -47,14 +47,6 @@ class SQLValidationTests(unittest.TestCase):
     def test_applies_a_bounded_result_limit(self):
         self.assertIn("LIMIT 5000", validate_sql(f"SELECT total_sales FROM {DAILY}"))
 
-    def test_approves_food_performance_table_and_schema(self):
-        query = (
-            'SELECT food_name, SUM(total_quantity) AS units_sold '
-            'FROM "swiggy_gold"."gld_food_performance" '
-            'GROUP BY food_name ORDER BY units_sold DESC LIMIT 1'
-        )
-        self.assertIn("gld_food_performance", validate_sql(query))
-
     def test_athena_boundary_validates_before_starting_query(self):
         original = text_to_sql.athena
         mock_athena = Mock()
@@ -134,33 +126,28 @@ class AgentTests(unittest.TestCase):
         self.assertIn("do not contain enough information", result.answer)
         executor.assert_not_called()
 
-    def test_most_selling_dish_uses_units_sold_evidence(self):
-        query = (
-            'SELECT food_name, SUM(total_quantity) AS units_sold '
-            'FROM "swiggy_gold"."gld_food_performance" '
-            'GROUP BY food_name ORDER BY units_sold DESC LIMIT 1'
-        )
-        report = self.report([{"food_name": "Paneer Wrap", "units_sold": "42"}])
+    def test_most_selling_dish_is_unsupported_without_food_gold_data(self):
+        executor = Mock()
         result = analyze_question(
             "most selling dish",
-            sql_generator=lambda _: query,
-            query_executor=Mock(return_value=report),
+            sql_generator=lambda _: "UNSUPPORTED: food-level sales are not available.",
+            query_executor=executor,
         )
-        self.assertIn("Paneer Wrap", result.answer)
-        self.assertIn("gld_food_performance", result.source_tables[0])
+        self.assertEqual(result.error, "unsupported_question")
+        executor.assert_not_called()
 
-    def test_missing_food_gold_table_gives_dbt_next_step(self):
+    def test_missing_gold_table_gives_dbt_next_step(self):
         query = (
-            'SELECT food_name, SUM(total_quantity) AS units_sold '
-            'FROM "swiggy_gold"."gld_food_performance" '
-            'GROUP BY food_name ORDER BY units_sold DESC LIMIT 1'
+            'SELECT restaurant_city, SUM(completed_orders) AS completed_orders '
+            'FROM "swiggy_gold"."gld_city_performance" '
+            'GROUP BY restaurant_city ORDER BY completed_orders DESC LIMIT 10'
         )
         result = analyze_question(
-            "most selling dish",
+            "show completed orders by city",
             sql_generator=lambda _: query,
             query_executor=Mock(
                 side_effect=RuntimeError(
-                    "TABLE_NOT_FOUND: swiggy_gold.gld_food_performance"
+                    "TABLE_NOT_FOUND: swiggy_gold.gld_city_performance"
                 )
             ),
         )

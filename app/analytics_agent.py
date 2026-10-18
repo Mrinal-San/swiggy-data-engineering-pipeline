@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+import re
 from time import perf_counter
 from typing import Callable
 
@@ -206,20 +207,20 @@ def analyze_question(
         )
     except Exception as exc:
         error_text = str(exc).lower()
-        if "gld_food_performance" in error_text and any(
-            marker in error_text
-            for marker in ("table_not_found", "table not found", "does not exist")
-        ):
+        missing_model = re.search(r"gld_[a-z0-9_]+", error_text)
+        if missing_model and any(marker in error_text for marker in (
+            "table_not_found", "table not found", "does not exist",
+        )):
+            model = missing_model.group(0)
             answer = (
-                "Dish-level analysis is ready in the app, but the Gold table has "
-                "not been built in Athena yet. Run dbt for gld_food_performance, "
-                "then refresh the app."
+                f"The Gold model {model} is not available in Athena yet. "
+                f"Run dbt for {model}, then refresh the app."
             )
         elif isinstance(exc, ValueError):
             answer = (
                 "That question could not be answered from the approved Gold "
                 "tables and columns. Try asking about sales, orders, restaurants, "
-                "dishes, cities, cuisine, ratings, or delivery metrics."
+                "cities, cuisine, ratings, or delivery metrics."
             )
         else:
             answer = "I could not answer this using the approved Gold data. Check the question or query setup."

@@ -15,6 +15,8 @@ coverage.xml
 htmlcov/
 build/
 dist/
+node_modules/
+frontend/.vite/
 *.egg-info/
 
 # Local secrets and credentials
@@ -26,8 +28,6 @@ dist/
 **/.aws/
 **/credentials
 **/credentials.*
-/.streamlit/secrets.toml
-/.streamlit/credentials.toml
 **/secrets.toml
 *.pem
 *.key

@@ -47,6 +47,20 @@ GOLD_TABLES = {
         "total_recorded_sales", "completed_order_sales",
         "avg_order_customer_rating", "avg_delivery_time_min",
     ],
+    "gld_city_performance": [
+        "restaurant_city", "total_orders", "completed_orders",
+        "non_completed_orders", "completion_rate_pct", "completed_sales",
+        "completed_items", "completed_quantity", "completed_subtotal",
+        "completed_discount", "completed_delivery_fee", "completed_gst",
+        "average_order_value", "avg_customer_rating", "avg_delivery_time_min",
+    ],
+    "gld_cuisine_performance": [
+        "cuisine", "total_orders", "completed_orders", "non_completed_orders",
+        "completion_rate_pct", "completed_sales", "completed_items",
+        "completed_quantity", "completed_subtotal", "completed_discount",
+        "completed_delivery_fee", "completed_gst", "average_order_value",
+        "avg_customer_rating", "avg_delivery_time_min",
+    ],
     "gld_customer_analytics": [
         "user_id", "total_orders", "completed_orders", "cancelled_orders",
         "first_order_date", "last_order_date", "total_completed_spend",

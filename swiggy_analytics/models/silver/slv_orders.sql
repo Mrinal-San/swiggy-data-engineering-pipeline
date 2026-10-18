@@ -22,8 +22,16 @@ cleaned as (
 
         user_id,
         r_id as restaurant_id,
-        nullif(trim(restaurant_city), '') as restaurant_city,
-        nullif(trim(cuisine), '') as cuisine,
+
+        nullif(
+            trim(BOTH '"' FROM trim(restaurant_city)),
+            ''
+        ) as restaurant_city,
+
+        nullif(
+            trim(BOTH '"' FROM trim(cuisine)),
+            ''
+        ) as cuisine,
 
         items_count,
         sales_qty,

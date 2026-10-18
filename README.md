@@ -1,6 +1,6 @@
 # Swiggy Data Engineering Pipeline
 
-An AWS and dbt analytics pipeline with a Streamlit interface for exploring curated Swiggy data. The project uses Amazon S3 for storage, AWS Glue Data Catalog for table metadata, Amazon Athena for SQL execution, and Google Gemini to turn natural-language questions into draft queries.
+An AWS and dbt analytics pipeline with a Flask API and React dashboard for exploring curated Swiggy data. The project uses Amazon S3 for storage, AWS Glue Data Catalog for table metadata, Amazon Athena for SQL execution, and Google Gemini to turn natural-language questions into draft queries.
 
 > **Project status:** The code and local datasets are present in this workspace. AWS resources, data uploads, and live query results are account-specific and must be verified in your environment. The project has no scheduler or production deployment.
 
@@ -11,13 +11,13 @@ The pipeline follows a raw, Silver, and Gold flow:
 1. CSV files are stored in S3 under `raw/`.
 2. Glue Data Catalog tables describe the files for Athena.
 3. dbt builds cleaned Silver views and analytics-oriented Gold tables.
-4. The Streamlit application queries verified Gold tables for its dashboard and analytics sections. The AI Data Assistant uses the approved Gold-table allowlist.
+4. The Flask API queries verified Gold tables for the React dashboard and analytics sections. The AI Data Assistant reuses the approved Gold-table query workflow.
 
 The application does not load the large CSV files into memory. It sends SQL to Athena and displays the returned results.
 
 ![Swiggy Data Engineering Pipeline architecture](docs/architecture.png)
 
-*Architecture image retained for now; replace `docs/architecture.png` when the updated diagram is ready.*
+*Architecture diagram for the Flask API, React client, and AI-to-SQL query flow.*
 
 ## What's included
 
@@ -28,7 +28,7 @@ The application does not load the large CSV files into memory. It sends SQL to A
 | Silver | Seven dbt views in `swiggy_silver`, including a users model that excludes names, emails, and passwords |
 | Gold | Daily sales, restaurant performance, customer, rating, delivery, order-status, city, cuisine, and top-restaurant analytics models in `swiggy_gold` |
 | Data quality | dbt schema tests and a custom test for duplicate menu combinations |
-| Application | Swiggy-branded Streamlit dashboard, analytics sections, and Gemini-powered AI Data Assistant |
+| Application | Flask JSON API, React/Vite dashboard, and Gemini-powered AI Data Assistant |
 | Orchestration | Not included; data upload, dbt runs, and refreshes are manual |
 
 SQL is parsed with SQLGlot and constrained to read-only queries over approved Gold tables and columns. AWS IAM remains the access-control boundary; review this learning project before production use. Sales fields describe recorded order amounts and should not be treated as settled payments without a separate business definition.
@@ -37,22 +37,28 @@ SQL is parsed with SQLGlot and constrained to read-only queries over approved Go
 
 ```text
 .
-├── app/                         # Streamlit, controlled analytics agent, Gemini/Athena
-│   └── assets/                  # Swiggy wordmark and app icon (SVG)
-├── data/raw/                    # Local CSV inputs; excluded from Git
-├── docs/                        # Architecture diagram
-├── glue/                        # Glue crawler setup guide
-├── swiggy_analytics/            # dbt project, models, and tests
-├── tests/                       # Local analytics-agent and SQL-validation tests
-├── .env.example                 # Local configuration template
-├── .gitignore
-└── requirements.txt
+|-- app/                         # Shared analytics agent and Gemini/Athena SQL validation
+|-- backend/                     # Flask API
+|   |-- routes/
+|   |-- services/
+|   `-- tests/                    # Mocked API tests
+|-- data/raw/                    # Local CSV inputs (excluded from Git)
+|-- docs/                        # Architecture diagram
+|-- frontend/                    # React/Vite client
+|   |-- public/assets/            # Swiggy logo asset
+|   `-- package.json
+|-- glue/                         # Glue crawler setup guide
+|-- swiggy_analytics/             # dbt project, models, and tests
+|-- tests/                        # Analytics-agent and SQL-validation tests
+|-- .env.example                  # Backend configuration template
+`-- requirements.txt              # Pipeline and analytics dependencies
 ```
 
 ## Requirements
 
 - Windows with PowerShell
 - Python 3.12
+- Node.js 20.19 or newer and npm for the React client
 - AWS CLI v2 and an AWS identity authorized for the required resources
 - Google AI Studio API key for the Gemini interface
 - An S3 bucket, Glue Data Catalog tables, and Athena workgroup configured for your AWS account
@@ -108,20 +114,42 @@ dbt test --project-dir $ProjectDir --profiles-dir $ProfileDir
 
 `dbt run` builds views and tables in Athena; `dbt test` executes queries as well. Both can incur costs. Start only after confirming the source tables and target schemas.
 
-## Run the application
+## Run the Flask + React application
 
-With `.env` and AWS access configured, run the single Streamlit entry point:
+With `.env` and AWS access configured, install the Flask API dependencies from the repository root:
 
 ```powershell
-python -m streamlit run .\app\streamlit_app.py
+python -m pip install -r .\backend\requirements.txt
 ```
 
-The app has separate sidebar sections for **Dashboard**, **AI Assistant**, **Restaurant Analytics**, **Customer Analytics**, **Delivery & Orders**, and **Data Status**. The Dashboard applies a selected date range and INR filter to its daily sales KPIs and date-based charts. The customer, restaurant, delivery, and order-status sections use Gold models that contain all-time aggregates; those views are labeled accordingly. The dashboard date selection and AI conversation remain in Streamlit session state while navigating between sections.
+In the first terminal, start Flask:
 
-The AI Data Assistant uses the existing bounded workflow: Gemini drafts a query, SQLGlot validates one read-only statement against the approved Gold tables and columns, and Athena executes it. The app displays returned rows and may chart results with clearly meaningful time-series or category-comparison columns. Generated SQL and technical errors are available in collapsed expanders. It never executes generated Python. AI requests require `GEMINI_API_KEY`; all data views require AWS access and the corresponding Gold tables. Dashboard queries are cached for up to 5 minutes, while generated SQL and AI query results are cached for up to 60 seconds. Refreshing clears these caches and may trigger new Athena queries.
+```powershell
+python -m flask --app backend.app run --host 127.0.0.1 --port 5000
+```
 
-Recorded sales include all order statuses and are not a settled-payment or profit measure. Average order value is recorded sales divided by recorded orders. Restaurant rankings use completed-order sales and are all-time because `gld_restaurant_performance` is a restaurant-level aggregate without a dashboard date filter. Delivery averages are weighted by orders with a recorded delivery time. Customer summaries are all-time aggregates. The AI query allowlist follows the current Gold schemas in `app/text_to_sql.py`; it does not include removed models such as `gld_food_performance`.
+In a second terminal, install and start the React client:
 
+```powershell
+Set-Location .\frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+Open the local URL printed by Vite (normally `http://127.0.0.1:5173`; Vite selects another port if it is occupied). The dev server proxies `/api` requests to Flask on port 5000. Set `FRONTEND_ORIGIN` if the client uses a different origin. The frontend API base can be changed with `VITE_API_BASE_URL` (see `frontend/.env.example`).
+
+The React app has **Dashboard**, **AI Data Assistant**, and **Data Status** sections. The dashboard uses orange KPI cards and a bento-style visualization layout, filters its sales charts by date, and shows all-time delivery order-status totals in a pie chart. Refresh clears the backend query cache. The AI assistant uses the existing workflow: Gemini drafts SQL, SQLGlot validates one read-only query against approved Gold tables and columns, and Athena executes it. AI requests require `GEMINI_API_KEY`; data endpoints require AWS access and the corresponding Gold tables. API errors are sanitized and carry a request ID for server logs. The API allows requests from the configured local frontend origin.
+
+API tests in `backend/tests/` mock the analytics services. Install their dependencies and run them from the repository root:
+
+```powershell
+python -m pip install -r .\backend\dev-requirements.txt
+python -m pytest .\backend\tests -v
+```
+
+The architecture diagram illustrates the Flask + React serving layer and AI-to-SQL flow.
+
+Sales values describe recorded order amounts and are not settled payments. Average order value is recorded sales divided by recorded orders. Restaurant rankings use completed-order sales and are all-time because `gld_restaurant_performance` has no dashboard date dimension. Delivery averages are weighted by orders with recorded delivery time. Customer summaries are all-time aggregates. The AI allowlist follows the Gold model schemas currently defined in `app/text_to_sql.py`.
 An optional Gemini connectivity check is available at `app/test_gemini.py`. Running it makes an external API request and may use quota:
 
 ```powershell
@@ -130,11 +158,20 @@ python .\app\test_gemini.py
 
 ## Validation
 
-Run the local mocked agent and SQL-safety checks with:
+Install backend development dependencies, then run the local mocked agent and SQL-safety checks from the repository root:
 
 ```powershell
+python -m pip install -r .\backend\dev-requirements.txt
 python -m unittest discover -s tests -v
-python -m compileall -q .\app .\tests
+python -m pytest .\backend\tests -v
+python -m compileall -q .\app .\backend .\tests
+```
+
+Build the React client with:
+
+```powershell
+Set-Location .\frontend
+npm.cmd run build
 ```
 
 Other useful local checks include:
@@ -164,7 +201,7 @@ These checks do not prove that your AWS resources or live data are correct. Veri
 
 ## Cleanup
 
-Stop Streamlit with **Ctrl+C**. To remove only the local virtual environment later, deactivate it and run:
+Stop the Flask and Vite development servers with **Ctrl+C**. To remove only the local virtual environment later, deactivate it and run:
 
 ```powershell
 deactivate

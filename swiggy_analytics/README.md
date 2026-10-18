@@ -6,20 +6,20 @@ This dbt project implements the bronze, silver, and gold layers for the Swiggy d
 
 - `models/bronze/` - source definitions and table metadata for the raw datasets
 - `models/silver/` - cleaned and typed transformations for each core entity
-- `models/gold/` - aggregated sales, restaurant, and dish performance models
+- `models/gold/` - aggregated sales, restaurant, customer, rating, delivery, order-status, city, and cuisine models
 - `tests/` - custom dbt tests for business-level uniqueness and validation
 - `macros/` - project macros, including schema-name generation
 
 ## Expected dbt inventory
 
-Current Stage 1 inventory includes:
+Current project inventory includes:
 
 - 7 bronze sources (`food`, `menu`, `orders`, `order_items`, `restaurants`, `reviews`, `users`)
 - 7 silver models
-- 3 gold models: `gld_daily_sales`, `gld_restaurant_performance`, and `gld_food_performance`
-- 24 data tests, including uniqueness checks for menu combinations and the dish-performance grain
+- 9 gold models covering daily sales, restaurants, customers, ratings, delivery, order status, cities, and cuisines
+- Schema tests and custom tests for menu-combination uniqueness
 
-`gld_food_performance` joins cleaned order items to food names and order dates/statuses. `total_quantity` counts units in all statuses, while `completed_quantity` counts units from completed orders. Run this model and its tests in the configured Athena account before querying dish-level results.
+The Gold models aggregate order data from the cleaned Silver layer. Dashboard sales charts use date-filtered daily sales; customer, restaurant, delivery, and order-status metrics are aggregate models.
 
 ## dbt profile configuration
 

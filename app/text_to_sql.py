@@ -35,9 +35,9 @@ athena = boto3.client("athena", region_name=REGION)
 GOLD_TABLES = {
     "gld_daily_sales": [
         "order_date", "restaurant_city", "cuisine", "currency",
-        "total_orders", "total_items", "total_quantity",
+        "total_orders", "completed_orders", "total_items", "total_quantity",
         "total_subtotal", "total_discount", "total_delivery_fee",
-        "total_gst", "total_sales", "average_order_value",
+        "total_gst", "total_sales", "completed_order_sales", "average_order_value",
         "avg_delivery_time_min", "avg_customer_rating",
     ],
     "gld_restaurant_performance": [
@@ -47,11 +47,36 @@ GOLD_TABLES = {
         "total_recorded_sales", "completed_order_sales",
         "avg_order_customer_rating", "avg_delivery_time_min",
     ],
-    "gld_food_performance": [
-        "food_id", "food_name", "order_date", "restaurant_id",
-        "restaurant_city", "cuisine", "currency", "order_status",
-        "total_quantity", "completed_quantity", "total_orders",
-        "total_item_sales", "completed_item_sales",
+    "gld_customer_analytics": [
+        "user_id", "total_orders", "completed_orders", "cancelled_orders",
+        "first_order_date", "last_order_date", "total_completed_spend",
+        "avg_completed_order_value", "avg_customer_rating", "avg_delivery_time_min",
+    ],
+    "gld_customer_rating_analysis": [
+        "restaurant_id", "restaurant_name", "restaurant_city", "cuisine",
+        "total_orders", "completed_orders", "rated_orders", "unrated_orders",
+        "avg_customer_rating", "rating_1_count", "rating_2_count",
+        "rating_3_count", "rating_4_count", "rating_5_count",
+        "avg_delivery_time_min", "first_order_date", "last_order_date",
+    ],
+    "gld_delivery_performance": [
+        "restaurant_id", "restaurant_city", "cuisine", "currency",
+        "total_orders", "completed_orders", "orders_with_delivery_time",
+        "avg_delivery_time_min", "min_delivery_time_min", "max_delivery_time_min",
+        "avg_customer_rating", "orders_with_customer_rating", "completion_rate_pct",
+    ],
+    "gld_order_status_analysis": [
+        "order_status", "restaurant_city", "currency", "total_orders",
+        "completed_orders", "cancelled_orders", "pending_orders",
+        "total_recorded_sales", "completed_sales", "total_discount",
+        "total_delivery_fee", "total_gst", "avg_customer_rating",
+        "avg_delivery_time_min",
+    ],
+    "gld_top_restaurants": [
+        "restaurant_id", "restaurant_name", "restaurant_city", "cuisine",
+        "restaurant_rating", "restaurant_rating_count", "restaurant_cost",
+        "total_orders", "completed_orders", "completed_order_sales",
+        "avg_order_customer_rating", "avg_delivery_time_min", "sales_rank",
     ],
 }
 SILVER_TABLES = {
@@ -96,10 +121,10 @@ Rules:
 - Include LIMIT 100 unless the query already has a stricter limit.
 - For highest completed restaurant sales, use completed_order_sales.
 - For daily sales, use total_sales from gld_daily_sales.
-- For most-selling dishes, rank SUM(total_quantity) from gld_food_performance;
-  if asked for completed orders only, rank SUM(completed_quantity).
-- Dish quantities include all order statuses unless the question says completed.
-- Dish sales use total_item_sales or completed_item_sales only when asked for sales.
+- Customer-level metrics in gld_customer_analytics are all-time aggregates.
+- gld_delivery_performance is an all-time restaurant-level aggregate; weight
+  average delivery time by orders_with_delivery_time when combining rows.
+- gld_order_status_analysis contains one aggregate row per status, city, and currency.
 - If the question cannot be answered from these columns, return exactly:
   UNSUPPORTED: followed by a short reason.
 - Questions asking for causes or causal relationships must be marked unsupported.

@@ -122,10 +122,10 @@ The AI Data Assistant uses the existing bounded workflow: Gemini drafts a query,
 
 Recorded sales include all order statuses and are not a settled-payment or profit measure. Average order value is recorded sales divided by recorded orders. Restaurant rankings use completed-order sales and are all-time because `gld_restaurant_performance` is a restaurant-level aggregate without a dashboard date filter. Delivery averages are weighted by orders with a recorded delivery time. Customer summaries are all-time aggregates. The AI query allowlist follows the current Gold schemas in `app/text_to_sql.py`; it does not include removed models such as `gld_food_performance`.
 
-An optional Gemini connectivity check is available at `app/test_openai.py` (the filename is retained for historical reasons). Running it makes an external API request and may use quota:
+An optional Gemini connectivity check is available at `app/test_gemini.py`. Running it makes an external API request and may use quota:
 
 ```powershell
-python .\app\test_openai.py
+python .\app\test_gemini.py
 ```
 
 ## Validation

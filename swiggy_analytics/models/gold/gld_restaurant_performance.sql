@@ -1,92 +1,38 @@
-
-with restaurants as (
-
-    select
-        trim(cast(restaurant_id as varchar)) as restaurant_id,
-        restaurant_name,
-        city as restaurant_city,
-        cuisine,
-        rating as restaurant_rating,
-        rating_count as restaurant_rating_count,
-        cost as restaurant_cost
-    from {{ ref('slv_restaurants') }}
-
-),
-
-orders as (
-
-    select
-        trim(cast(restaurant_id as varchar)) as restaurant_id,
-        order_id,
-        order_status,
-        sales_amount,
-        customer_rating,
-        delivery_time_min
-    from {{ ref('slv_orders') }}
-
-),
-
-restaurant_order_metrics as (
-
+with item_sales as (
     select
         restaurant_id,
+        order_id,
+        sum(coalesce(line_amount, price * quantity, price, 0)) as order_item_sales
+    from {{ ref('slv_order_items') }}
+    group by restaurant_id, order_id
+),
 
-        count(distinct order_id) as total_orders,
-
-        count(
-            distinct case
-                when lower(trim(order_status)) = 'completed'
-                then order_id
-            end
-        ) as completed_orders,
-
-        sum(sales_amount) as total_recorded_sales,
-
-        sum(
-            case
-                when lower(trim(order_status)) = 'completed'
-                then sales_amount
-                else 0
-            end
-        ) as completed_order_sales,
-
-        avg(
-            case
-                when lower(trim(order_status)) = 'completed'
-                then customer_rating
-            end
-        ) as avg_order_customer_rating,
-
-        avg(
-            case
-                when lower(trim(order_status)) = 'completed'
-                then delivery_time_min
-            end
-        ) as avg_delivery_time_min
-
-    from orders
-    group by restaurant_id
-
+order_metrics as (
+    select
+        trim(cast(o.restaurant_id as varchar)) as restaurant_id,
+        count(distinct o.order_id) as total_orders,
+        sum(coalesce(i.order_item_sales, 0)) as total_sales,
+        avg(o.customer_rating) as avg_order_customer_rating,
+        avg(o.delivery_time_min) as avg_delivery_time_min
+    from {{ ref('slv_orders') }} o
+    left join item_sales i
+        on trim(cast(o.restaurant_id as varchar)) = trim(cast(i.restaurant_id as varchar))
+        and trim(cast(o.order_id as varchar)) = trim(cast(i.order_id as varchar))
+    group by trim(cast(o.restaurant_id as varchar))
 )
 
 select
-    r.restaurant_id,
+    trim(cast(r.restaurant_id as varchar)) as restaurant_id,
     r.restaurant_name,
-    r.restaurant_city,
+    r.city as restaurant_city,
     r.cuisine,
-    r.restaurant_rating,
-    r.restaurant_rating_count,
-    r.restaurant_cost,
-
+    r.rating as restaurant_rating,
+    r.rating_count as restaurant_rating_count,
+    r.cost as restaurant_cost,
     coalesce(m.total_orders, 0) as total_orders,
-    coalesce(m.completed_orders, 0) as completed_orders,
-    coalesce(m.total_recorded_sales, 0) as total_recorded_sales,
-    coalesce(m.completed_order_sales, 0) as completed_order_sales,
-
+    coalesce(m.total_sales, 0) as total_sales,
     m.avg_order_customer_rating,
     m.avg_delivery_time_min
-
-from restaurants r
-
-left join restaurant_order_metrics m
-    on r.restaurant_id = m.restaurant_id
+from {{ ref('slv_restaurants') }} r
+left join order_metrics m
+    on trim(cast(r.restaurant_id as varchar)) = m.restaurant_id

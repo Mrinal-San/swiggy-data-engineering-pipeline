@@ -35,16 +35,13 @@ athena = boto3.client("athena", region_name=REGION)
 GOLD_TABLES = {
     "gld_daily_sales": [
         "order_date", "restaurant_city", "cuisine", "currency",
-        "total_orders", "completed_orders", "total_items", "total_quantity",
-        "total_subtotal", "total_discount", "total_delivery_fee",
-        "total_gst", "total_sales", "completed_order_sales", "average_order_value",
+        "total_orders", "total_items", "total_quantity", "total_sales", "average_order_value",
         "avg_delivery_time_min", "avg_customer_rating",
     ],
     "gld_restaurant_performance": [
         "restaurant_id", "restaurant_name", "restaurant_city",
         "cuisine", "restaurant_rating", "restaurant_rating_count",
-        "restaurant_cost", "total_orders", "completed_orders",
-        "total_recorded_sales", "completed_order_sales",
+        "restaurant_cost", "total_orders", "total_sales",
         "avg_order_customer_rating", "avg_delivery_time_min",
     ],
     "gld_city_performance": [
@@ -96,10 +93,14 @@ GOLD_TABLES = {
 SILVER_TABLES = {
     "slv_orders": [
         "order_id", "order_date", "restaurant_id", "restaurant_city",
-        "cuisine", "items_count", "sales_qty", "subtotal", "discount",
-        "delivery_fee", "gst", "sales_amount", "currency", "order_status",
+        "cuisine", "items_count", "sales_qty", "currency", "order_status",
         "customer_rating", "delivery_time_min",
     ],
+    "slv_order_items": [
+        "order_item_id", "order_id", "restaurant_id", "food_id",
+        "price", "quantity", "line_amount",
+    ],
+    "slv_food": ["food_id", "food_name", "food_type"],
     "slv_restaurants": [
         "restaurant_id", "restaurant_name", "city", "rating",
         "rating_count", "cost", "cuisine",
@@ -113,14 +114,16 @@ TABLE_SCHEMAS = {
 
 
 def generate_sql(question: str) -> str:
-    """Generate SQL using the actual Gold table schemas."""
+    """Generate SQL from the current approved Gold and sales-detail schemas."""
     schema_description = "\n".join(
         f"Table {table}: {', '.join(columns)}"
-        for table, columns in GOLD_TABLES.items()
+        for table, columns in ALLOWED_TABLES.items()
     )
 
     prompt = f"""
-You generate Amazon Athena SQL for a Swiggy analytics project.
+You generate Amazon Athena SQL for a Swiggy analytics project. Interpret common
+paraphrases and typos by their intended business meaning, and prefer returning
+a useful, bounded result over rejecting unfamiliar wording.
 
 Available schema:
 {schema_description}
@@ -128,19 +131,38 @@ Available schema:
 Rules:
 - Generate exactly one read-only SELECT query.
 - Use only the listed tables and their listed columns.
-- Fully qualify tables as "swiggy_gold"."table_name".
+- Fully qualify each table using its listed schema: Gold tables use
+  "swiggy_gold"."table_name"; approved Silver detail tables use
+  "swiggy_silver"."table_name".
 - Never use INSERT, UPDATE, DELETE, MERGE, DROP, CREATE, ALTER,
   UNLOAD, or multiple statements.
 - Never use SELECT *.
 - Include LIMIT 100 unless the query already has a stricter limit.
-- For highest completed restaurant sales, use completed_order_sales.
-- For daily sales, use total_sales from gld_daily_sales.
+- All sales and revenue questions must use order-item values, not the legacy
+  sales_amount, subtotal, or completed-sales/order fields. The item value is
+  COALESCE(line_amount, price * quantity, price, 0) from slv_order_items.
+- For item/dish/food sales, join slv_order_items to slv_food on food_id (cast
+  both IDs to varchar) and group by food_name. Sum the item value above.
+- For cuisine sales, join slv_order_items to slv_orders on order_id (cast both
+  IDs to varchar), group by cuisine, and sum the item value above. A request
+  for dish sales and a request for cuisine sales are both answerable, but they
+  are different groupings; do not substitute one for the other.
+- For daily sales, use total_sales from gld_daily_sales. For restaurant sales,
+  use total_sales from gld_restaurant_performance. Both now use order items.
+- For total orders, use total_orders; do not filter on completed_orders.
+- Treat item, dish, food, menu item, cuisine/category, restaurant, outlet,
+  location/city, spend/sales/revenue, and time-period wording as synonyms only
+  where the approved columns support that interpretation.
 - Customer-level metrics in gld_customer_analytics are all-time aggregates.
 - gld_delivery_performance is an all-time restaurant-level aggregate; weight
   average delivery time by orders_with_delivery_time when combining rows.
 - gld_order_status_analysis contains one aggregate row per status, city, and currency.
-- If the question cannot be answered from these columns, return exactly:
-  UNSUPPORTED: followed by a short reason.
+- If the exact requested measure is unavailable, answer with the closest
+  relevant database overview using available Gold data (for example, total
+  item-based sales by date, city, or cuisine). Do not invent columns or facts.
+- Return UNSUPPORTED only for requests with no meaningful relationship to the
+  Swiggy database or for causal questions that these aggregate tables cannot
+  establish.
 - Questions asking for causes or causal relationships must be marked unsupported.
 - Never infer causes, correlations, or financial profit from these tables.
 - Otherwise return SQL only, with no Markdown fences or explanation.
@@ -152,10 +174,14 @@ User question: {question}
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is missing from your .env file.")
 
+    
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
     response = get_genai_client(api_key).models.generate_content(
-        model="gemini-3.8-flash",
+        model=model_name,
         contents=prompt,
     )
+
 
     sql = (response.text or "").strip()
     sql = re.sub(r"^```(?:sql)?\s*", "", sql, flags=re.IGNORECASE)
